@@ -11,106 +11,50 @@ import (
 var _ = net.Listen
 var _ = os.Exit
 
-type HttpRequest struct {
-	Method  string
-	URL     string
-	Version string
-}
-
-type HttpResponse struct {
-	version string
-	Status  string
-	URL     string
-}
+const CRLF = "\r\n"
 
 func main() {
+	// You can use print statements as follows for debugging, they'll be visible when running tests.
 	fmt.Println("Logs from your program will appear here!")
-
+	// Uncomment this block to pass the first stage
 	l, err := net.Listen("tcp", "0.0.0.0:4221")
 	if err != nil {
 		fmt.Println("Failed to bind to port 4221")
 		os.Exit(1)
 	}
 
-	for {
-		conn, err := l.Accept()
-		if err != nil {
-			fmt.Println("Error accepting connection: ", err.Error())
-			os.Exit(1)
-		}
+	defer l.Close()
 
-		go run(conn)
-	}
-}
-
-func run(conn net.Conn) {
-	byt := make([]byte, 1)
-	acc := make([]byte, 0)
-
-	for {
-		n, _ := conn.Read(byt)
-		acc = append(acc, byt[:n]...)
-		if end := strings.Contains(string(acc), "\r\n\r\n"); end {
-			break
-		}
+	conn, err := l.Accept()
+	if err != nil {
+		fmt.Println("Error accepting connection: ", err.Error())
+		os.Exit(1)
 	}
 
-	// fmt.Println(string(acc))
-	hreq := ParseStreamToHttpReq(acc)
-	hresp := ConstructResp(hreq)
-	encResp := Encode(hresp)
-	fmt.Println(string(encResp))
-	SendResp(conn, encResp)
-}
-
-func SeparateSequenceByLines(byt []byte) [][]byte {
-	lines := make([][]byte, 0)
-	line := make([]byte, 0)
-	for i := 0; i < len(byt)-1; i++ {
-		if string(byt[i:i+2]) != "\r\n" {
-			line = append(line, byt[i])
-		} else {
-			lines = append(lines, line)
-			line = []byte("")
-		}
+	buf := make([]byte, 1024)
+	_, err = conn.Read(buf)
+	if err != nil {
+		fmt.Println("Error accepting connection: ", err)
 	}
-	return lines
-}
 
-func ParseStreamToHttpReq(byt []byte) HttpRequest {
-	lineStr := SeparateSequenceByLines(byt)
+	fmt.Println("Accepted connection from: ", conn.RemoteAddr())
+	req := string(buf)
+	lines := strings.Split(req, CRLF)
+	path := strings.Split(lines[0], " ")[1]
+	fmt.Println(path)
 
-	var hreq HttpRequest
-	splitStr := strings.Split(string(lineStr[0]), " ")
-	hreq.Method = splitStr[0]
-	hreq.URL = splitStr[1]
-	hreq.Version = splitStr[2]
-	return hreq
-}
+	var res string
 
-func Encode(hresp HttpResponse) []byte {
-	byt := make([]byte, 0)
-	byt = append(byt, []byte(hresp.version)...)
-	byt = append(byt, []byte(" ")...)
-	byt = append(byt, []byte(hresp.Status)...)
-	byt = append(byt, []byte("\r\n\r\n")...)
-	return byt
-}
-
-func SendResp(conn net.Conn, respbyt []byte) {
-	conn.Write(respbyt)
-}
-
-func ConstructResp(hreq HttpRequest) HttpResponse {
-	var hresp HttpResponse
-
-	hresp.version = hreq.Version
-	hresp.URL = hreq.URL
-	if hreq.URL == "/" {
-		hresp.Status = "200 OK"
+	if path == "/" {
+		res = "HTTP/1.1 200 OK\r\n\r\n"
+	} else if path[:5] == "/echo" {
+		dynamic_path := strings.Split(path, "/")[len(strings.Split(path, "/"))-1]
+		res = fmt.Sprintf("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: %d\r\n\r\n%s", len(dynamic_path), dynamic_path)
 	} else {
-		hresp.Status = "404 Not Found"
+		res = "HTTP/1.1 404 Not Found\r\n\r\n"
 	}
-	fmt.Printf("ver: %s, status: %s, url: %s\n", hresp.version, hresp.Status, hreq.URL)
-	return hresp
+
+	fmt.Println(res)
+	conn.Write([]byte(res))
+	fmt.Println("conn remote address", conn.RemoteAddr())
 }
