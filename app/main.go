@@ -37,7 +37,7 @@ func main() {
 		fmt.Println("Error accepting connection: ", err)
 	}
 
-	fmt.Println("Accepted connection from: ", conn.RemoteAddr())
+	// fmt.Println("Accepted connection from: ", conn.RemoteAddr())
 	req := string(buf)
 	lines := strings.Split(req, CRLF)
 	path := strings.Split(lines[0], " ")[1]
@@ -50,6 +50,10 @@ func main() {
 	} else if path[:5] == "/echo" {
 		dynamic_path := strings.Split(path, "/")[len(strings.Split(path, "/"))-1]
 		res = fmt.Sprintf("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: %d\r\n\r\n%s", len(dynamic_path), dynamic_path)
+	} else if path == "/user-agent" {
+		userAgent := lines[len(lines)-3]
+		userAgentVal := strings.Split(userAgent, " ")[len(strings.Split(userAgent, " "))-1]
+		res = fmt.Sprintf("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: %d\r\n\r\n%s", len(userAgentVal), userAgentVal)
 	} else {
 		res = "HTTP/1.1 404 Not Found\r\n\r\n"
 	}
