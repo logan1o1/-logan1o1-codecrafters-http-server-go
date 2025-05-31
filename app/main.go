@@ -1,9 +1,12 @@
 package main
 
 import (
+	"flag"
 	"fmt"
+	"io"
 	"net"
 	"os"
+	"path/filepath"
 	"strings"
 )
 
@@ -13,9 +16,16 @@ var _ = os.Exit
 
 const CRLF = "\r\n"
 
+var directory string
+
 func main() {
 	// You can use print statements as follows for debugging, they'll be visible when running tests.
 	fmt.Println("Logs from your program will appear here!")
+
+	dirFlag := flag.String("directory", ".", "directory to serve files from")
+	flag.Parse()
+	directory = *dirFlag
+
 	// Uncomment this block to pass the first stage
 	l, err := net.Listen("tcp", "0.0.0.0:4221")
 	if err != nil {
@@ -55,17 +65,33 @@ func concurent(conn net.Conn) {
 	if path == "/" {
 		res = "HTTP/1.1 200 OK\r\n\r\n"
 	} else if path[:5] == "/echo" {
-		dynamic_path := strings.Split(path, "/")[len(strings.Split(path, "/"))-1]
-		res = fmt.Sprintf("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: %d\r\n\r\n%s", len(dynamic_path), dynamic_path)
+		dynamicPath := strings.Split(path, "/")[len(strings.Split(path, "/"))-1]
+		res = fmt.Sprintf("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: %d\r\n\r\n%s", len(dynamicPath), dynamicPath)
 	} else if path == "/user-agent" {
 		userAgent := lines[len(lines)-3]
 		userAgentVal := strings.Split(userAgent, " ")[len(strings.Split(userAgent, " "))-1]
 		res = fmt.Sprintf("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: %d\r\n\r\n%s", len(userAgentVal), userAgentVal)
+	} else if strings.HasPrefix(path, "/files/") {
+		filename := strings.TrimPrefix(path, "/files/")
+		filePath := filepath.Join(directory, filename)
+		fmt.Println(filePath)
+		file, err := os.Open(filePath)
+		if err != nil {
+			res = "HTTP/1.1 404 Not Found\r\n\r\n"
+		} else {
+			defer file.Close()
+			fileContent, err := io.ReadAll(file)
+			if err != nil {
+				res = "HTTP/1.1 500 Internal Server Error\r\n\r\n"
+			} else {
+				res = fmt.Sprintf("HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: %d\r\n\r\n%s", len(fileContent), fileContent)
+			}
+		}
 	} else {
 		res = "HTTP/1.1 404 Not Found\r\n\r\n"
 	}
 
 	fmt.Println(res)
 	conn.Write([]byte(res))
-	fmt.Println("conn remote address", conn.RemoteAddr())
+	// fmt.Println("conn remote address", conn.RemoteAddr())
 }
