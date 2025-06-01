@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -49,7 +50,7 @@ func main() {
 
 func concurent(conn net.Conn) {
 	buf := make([]byte, 1024)
-	_, err := conn.Read(buf)
+	n, err := conn.Read(buf)
 	if err != nil {
 		fmt.Println("Error accepting connection: ", err)
 	}
@@ -58,6 +59,8 @@ func concurent(conn net.Conn) {
 	req := string(buf)
 	lines := strings.Split(req, CRLF)
 	path := strings.Split(lines[0], " ")[1]
+	method := strings.Split(lines[0], " ")[0]
+	fmt.Println(method)
 	fmt.Println(path)
 
 	var res string
@@ -75,18 +78,55 @@ func concurent(conn net.Conn) {
 		filename := strings.TrimPrefix(path, "/files/")
 		filePath := filepath.Join(directory, filename)
 		fmt.Println(filePath)
-		file, err := os.Open(filePath)
-		if err != nil {
-			res = "HTTP/1.1 404 Not Found\r\n\r\n"
-		} else {
-			defer file.Close()
-			fileContent, err := io.ReadAll(file)
+
+		if method == "GET" {
+			file, err := os.Open(filePath)
+			if err != nil {
+				res = "HTTP/1.1 404 Not Found\r\n\r\n"
+			} else {
+				defer file.Close()
+				fileContent, err := io.ReadAll(file)
+				if err != nil {
+					res = "HTTP/1.1 500 Internal Server Error\r\n\r\n"
+				} else {
+					res = fmt.Sprintf("HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: %d\r\n\r\n%s", len(fileContent), fileContent)
+				}
+			}
+		} else if method == "POST" {
+			headersBody := strings.SplitN(string(buf[:n]), "\r\n\r\n", 2)
+			headers := strings.Split(headersBody[0], "\r\n")
+			body := headersBody[1]
+			contentLength := 0
+
+			for _, line := range headers {
+				if strings.HasPrefix(line, "Content-Length:") {
+					lengthStr := strings.TrimSpace(strings.TrimPrefix(line, "Content-Length:"))
+					contentLength, err = strconv.Atoi(lengthStr)
+					if err != nil {
+						res = "HTTP/1.1 400 Bad Request\r\n\r\n"
+						return
+					}
+					break
+				}
+			}
+
+			for len(body) < contentLength {
+				moreBuf := make([]byte, contentLength-len(body))
+				m, err := conn.Read(moreBuf)
+				if err != nil {
+					res = "HTTP/1.1 500 Internal Server Error\r\n\r\n"
+					return
+				}
+				body += string(moreBuf[:m])
+			}
+			err := os.WriteFile(filePath, []byte(body), 0644)
 			if err != nil {
 				res = "HTTP/1.1 500 Internal Server Error\r\n\r\n"
 			} else {
-				res = fmt.Sprintf("HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: %d\r\n\r\n%s", len(fileContent), fileContent)
+				res = "HTTP/1.1 201 Created\r\n\r\n"
 			}
 		}
+
 	} else {
 		res = "HTTP/1.1 404 Not Found\r\n\r\n"
 	}
