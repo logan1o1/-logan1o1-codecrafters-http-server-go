@@ -50,34 +50,35 @@ func main() {
 }
 
 func handleConnection(conn net.Conn) {
-	// defer conn.Close()
+	defer conn.Close()
 	reader := bufio.NewReader(conn)
 
-	reqLine, err := reader.ReadString('\n')
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error reading request line: %v\n", err)
-		return
+	for {
+		reqLine, err := reader.ReadString('\n')
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error reading request line: %v\n", err)
+			return
+		}
+
+		fields := strings.Fields(reqLine)
+		if len(fields) < 2 || (len(fields) > 2 && fields[2] != "HTTP/1.1") {
+			fmt.Fprintf(os.Stderr, "Malformed or unsupported request: %q\n", reqLine)
+			return
+		}
+
+		method, path := fields[0], fields[1]
+		fmt.Printf("Received request: %s %s\n", method, path)
+
+		headers := parseHeaders(reader)
+		fmt.Println("Parsed headers:", headers)
+
+		response := handleRequest(method, path, headers, reader)
+		if _, err := conn.Write(response); err != nil {
+			fmt.Fprintf(os.Stderr, "Error writing response: %v\n", err)
+		}
+		fmt.Println("Response sent successfully")
+		fmt.Println("Connection closed")
 	}
-
-	fields := strings.Fields(reqLine)
-	if len(fields) < 2 || (len(fields) > 2 && fields[2] != "HTTP/1.1") {
-		fmt.Fprintf(os.Stderr, "Malformed or unsupported request: %q\n", reqLine)
-		return
-	}
-
-	method, path := fields[0], fields[1]
-	fmt.Printf("Received request: %s %s\n", method, path)
-
-	headers := parseHeaders(reader)
-	fmt.Println("Parsed headers:", headers)
-
-	response := handleRequest(method, path, headers, reader)
-	if _, err := conn.Write(response); err != nil {
-		fmt.Fprintf(os.Stderr, "Error writing response: %v\n", err)
-	}
-
-	fmt.Println("Response sent successfully")
-	// fmt.Println("Connection closed")
 }
 
 func parseHeaders(reader *bufio.Reader) map[string]string {
