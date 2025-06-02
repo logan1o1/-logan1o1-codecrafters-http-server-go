@@ -69,7 +69,7 @@ func concurent(conn net.Conn) {
 		res = "HTTP/1.1 200 OK\r\n\r\n"
 	} else if path[:5] == "/echo" {
 		dynamicPath := strings.Split(path, "/")[len(strings.Split(path, "/"))-1]
-		res = fmt.Sprintf("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: %d\r\n\r\n%s", len(dynamicPath), dynamicPath)
+		res = fmt.Sprintf("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: %d\r\n\r\n", len(dynamicPath))
 	} else if path == "/user-agent" {
 		userAgent := lines[len(lines)-3]
 		userAgentVal := strings.Split(userAgent, " ")[len(strings.Split(userAgent, " "))-1]
