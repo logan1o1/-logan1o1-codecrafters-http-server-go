@@ -77,7 +77,7 @@ func handleConnection(conn net.Conn) {
 	}
 
 	fmt.Println("Response sent successfully")
-	fmt.Println("Connection closed")
+	// fmt.Println("Connection closed")
 }
 
 func parseHeaders(reader *bufio.Reader) map[string]string {
