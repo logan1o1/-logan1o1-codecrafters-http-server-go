@@ -67,14 +67,18 @@ func handleConnection(conn net.Conn) {
 		}
 
 		method, path := fields[0], fields[1]
-		fmt.Printf("Received request: %s %s\n", method, path)
-
 		headers := parseHeaders(reader)
-		fmt.Println("Parsed headers:", headers)
+		fmt.Printf("Received request: %s %s\n", method, path)
+		fmt.Println("Parsed headers:", headers["connection"])
 
-		response := handleRequest(method, path, headers, reader)
+		closeConn := strings.ToLower(headers["connection"]) == "close"
+		response := handleRequest(method, path, headers, reader, closeConn)
 		if _, err := conn.Write(response); err != nil {
 			fmt.Fprintf(os.Stderr, "Error writing response: %v\n", err)
+			return
+		}
+		if closeConn {
+			return
 		}
 		fmt.Println("Response sent successfully")
 		fmt.Println("Connection closed")
@@ -103,10 +107,19 @@ func parseHeaders(reader *bufio.Reader) map[string]string {
 	return headers
 }
 
-func handleRequest(method, path string, headers map[string]string, reader *bufio.Reader) []byte {
+func httpResponse(status, headers, body string) []byte {
+	return []byte(fmt.Sprintf("HTTP/1.1 %s\r\n%sContent-Length: %d\r\n\r\n%s", status, headers, len(body), body))
+}
+
+func handleRequest(method, path string, headers map[string]string, reader *bufio.Reader, closeConn bool) []byte {
+	connHeader := ""
+	if closeConn {
+		connHeader = "Connection: close\r\n"
+	}
+
 	switch {
 	case method == "GET" && path == "/":
-		return []byte("HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n")
+		return httpResponse("200 OK", connHeader, "")
 
 	case method == "GET" && strings.HasPrefix(path, "/echo/"):
 		param := strings.TrimPrefix(path, "/echo/")
@@ -117,48 +130,48 @@ func handleRequest(method, path string, headers map[string]string, reader *bufio
 			gz.Close()
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "Gzip write error: %v\n", err)
-				return []byte("HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\n\r\n")
+				return httpResponse("500 Internal Server Error", connHeader, "")
 			}
-			headers := fmt.Sprintf("HTTP/1.1 200 OK\r\nContent-Encoding: gzip\r\nContent-Type: text/plain\r\nContent-Length: %d\r\n\r\n", buf.Len())
-			return append([]byte(headers), buf.Bytes()...)
+			head := fmt.Sprintf("%sContent-Encoding: gzip\r\nContent-Type: text/plain\r\n", connHeader)
+			return append([]byte(fmt.Sprintf("HTTP/1.1 200 OK\r\n%sContent-Length: %d\r\n\r\n", head, buf.Len())), buf.Bytes()...)
 		}
-		return []byte(fmt.Sprintf("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: %d\r\n\r\n%s", len(param), param))
+		return httpResponse("200 OK", connHeader+"Content-Type: text/plain\r\n", param)
 
 	case method == "GET" && path == "/user-agent":
 		ua := headers["user-agent"]
-		return []byte(fmt.Sprintf("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: %d\r\n\r\n%s", len(ua), ua))
+		return httpResponse("200 OK", connHeader+"Content-Type: text/plain\r\n", ua)
 
 	case method == "GET" && strings.HasPrefix(path, "/files/"):
 		filePath := filepath.Join(directory, strings.TrimPrefix(path, "/files/"))
 		file, err := os.ReadFile(filePath)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "File not found: %v\n", err)
-			return []byte("HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n")
+			return httpResponse("404 Not Found", connHeader, "")
 		}
-		return []byte(fmt.Sprintf("HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: %d\r\n\r\n%s", len(file), file))
+		return []byte(fmt.Sprintf("HTTP/1.1 200 OK\r\n%sContent-Type: application/octet-stream\r\nContent-Length: %d\r\n\r\n%s", connHeader, len(file), file))
 
 	case method == "POST" && strings.HasPrefix(path, "/files/"):
 		filePath := filepath.Join(directory, strings.TrimPrefix(path, "/files/"))
 		lengthStr, ok := headers["content-length"]
 		if !ok {
-			return []byte("HTTP/1.1 411 Length Required\r\nContent-Length: 0\r\n\r\n")
+			return httpResponse("411 Length Required", connHeader, "")
 		}
 		var contentLength int
 		_, err := fmt.Sscanf(lengthStr, "%d", &contentLength)
 		if err != nil || contentLength <= 0 {
-			return []byte("HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\n\r\n")
+			return httpResponse("400 Bad Request", connHeader, "")
 		}
 		body := make([]byte, contentLength)
 		if _, err := reader.Read(body); err != nil {
 			fmt.Fprintf(os.Stderr, "Error reading body: %v\n", err)
-			return []byte("HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\n\r\n")
+			return httpResponse("500 Internal Server Error", connHeader, "")
 		}
 		if err := os.WriteFile(filePath, body, 0644); err != nil {
 			fmt.Fprintf(os.Stderr, "Error writing file: %v\n", err)
-			return []byte("HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\n\r\n")
+			return httpResponse("500 Internal Server Error", connHeader, "")
 		}
-		return []byte("HTTP/1.1 201 Created\r\nContent-Length: 0\r\n\r\n")
+		return httpResponse("201 Created", connHeader, "")
 	}
 
-	return []byte("HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n")
+	return httpResponse("404 Not Found", connHeader, "")
 }
